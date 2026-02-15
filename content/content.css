@@ -22,6 +22,31 @@
   --ctb-zoom-inverse: 1;
 }
 
+/* Strong isolation from host-page CSS so rendering is consistent site-to-site. */
+#ctb-root,
+#ctb-root * {
+  box-sizing: border-box;
+}
+
+#ctb-root * {
+  font-family: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  line-height: 1.2;
+}
+
+#ctb-root button,
+#ctb-root input,
+#ctb-root select {
+  font: inherit;
+  color: inherit;
+}
+
+#ctb-root button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 #ctb-root[data-position="top"] {
   top: 0;
 }
@@ -53,6 +78,8 @@
   transform-origin: left top;
   transition: transform 160ms ease-out, opacity 160ms ease-out;
   will-change: transform;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -345,6 +372,8 @@
   flex: 1 1 auto;
   min-width: 42px;
   color: var(--ctb-text);
+  font-size: inherit;
+  line-height: 1.2;
 }
 
 #ctb-root .ctb-tab-metadata {
