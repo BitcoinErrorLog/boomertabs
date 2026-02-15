@@ -13,8 +13,9 @@
     "tabs",
     "tabGroups",
     "storage",
-    "scripting",
-    "favicon",
+    "favicon"
+  ],
+  "optional_permissions": [
     "windows"
   ],
   "host_permissions": [

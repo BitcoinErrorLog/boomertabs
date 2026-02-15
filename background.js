@@ -99,6 +99,8 @@ function safeTitle(tab) {
 
 async function getWindowState(windowId) {
   try {
+    const hasWindows = await chrome.permissions.contains({ permissions: ["windows"] });
+    if (!hasWindows) return "normal";
     const win = await chrome.windows.get(windowId);
     return win.state || "normal";
   } catch (_error) {
@@ -222,7 +224,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const senderWindowId = senderTab?.windowId;
 
     if (message?.type === "GET_STATE") {
-      const windowId = senderWindowId || (await chrome.windows.getCurrent()).id;
+      let windowId = senderWindowId;
+      if (!windowId) {
+        try {
+          windowId = (await chrome.windows.getCurrent()).id;
+        } catch {
+          const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          windowId = tab?.windowId;
+        }
+      }
+      if (!windowId) {
+        sendResponse({ ok: false, error: "Could not determine window." });
+        return;
+      }
       const payload = await buildWindowState(windowId);
       payload.zoomFactor = await getTabZoom(senderTab?.id);
       sendResponse({ ok: true, payload });
@@ -244,8 +258,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === "NEW_TAB") {
-      const targetWindowId = senderWindowId || (await chrome.windows.getCurrent()).id;
-      await chrome.tabs.create({ windowId: targetWindowId, active: true });
+      let targetWindowId = senderWindowId;
+      if (!targetWindowId) {
+        try {
+          targetWindowId = (await chrome.windows.getCurrent()).id;
+        } catch {
+          const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          targetWindowId = tab?.windowId;
+        }
+      }
+      await chrome.tabs.create(targetWindowId ? { windowId: targetWindowId, active: true } : { active: true });
       sendResponse({ ok: true });
       return;
     }
@@ -320,21 +342,25 @@ chrome.tabGroups.onCreated.addListener((group) => scheduleBroadcast(group.window
 chrome.tabGroups.onUpdated.addListener((group) => scheduleBroadcast(group.windowId));
 chrome.tabGroups.onRemoved.addListener((group) => scheduleBroadcast(group.windowId));
 
+async function broadcastAllWindows() {
+  try {
+    const windows = await chrome.windows.getAll({ populate: false });
+    windows.forEach((win) => scheduleBroadcast(win.id));
+  } catch {
+    const tabs = await chrome.tabs.query({});
+    const ids = [...new Set(tabs.map((t) => t.windowId).filter(Boolean))];
+    ids.forEach((id) => scheduleBroadcast(id));
+  }
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "sync") return;
   if (Object.keys(changes).length === 0) return;
-  chrome.windows.getAll({ populate: false }).then((windows) => {
-    windows.forEach((win) => scheduleBroadcast(win.id));
-  });
+  broadcastAllWindows();
 });
 
-chrome.windows.onFocusChanged.addListener(async () => {
-  const windows = await chrome.windows.getAll({ populate: false });
-  windows.forEach((win) => scheduleBroadcast(win.id));
-});
+chrome.windows.onFocusChanged.addListener(() => broadcastAllWindows());
 
 chrome.windows.onBoundsChanged.addListener((win) => {
-  if (win?.id) {
-    scheduleBroadcast(win.id);
-  }
+  if (win?.id) scheduleBroadcast(win.id);
 });
