@@ -5,7 +5,8 @@ let state = {
   settings: null,
   tabs: [],
   groups: [],
-  windowState: "normal"
+  windowState: "normal",
+  zoomFactor: 1
 };
 
 let rootEl;
@@ -14,7 +15,6 @@ let searchRowEl;
 let searchEl;
 let newTabEl;
 let hideBarEl;
-let hintEl;
 let handleEl;
 let contextMenuEl;
 let searchToggleEl;
@@ -29,6 +29,7 @@ let pageOffsetApplied = false;
 let originalHtmlPaddingTop = "";
 let originalHtmlPaddingBottom = "";
 let draggingTabId = null;
+let draggingFromRow = null;
 let searchExpanded = false;
 
 function debounce(fn, wait) {
@@ -56,6 +57,69 @@ function faviconURL(url, size) {
   }
 }
 
+function makeIcon(name) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("ctb-icon-svg", `ctb-icon-${name}`);
+
+  if (name === "search") {
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", "11");
+    circle.setAttribute("cy", "11");
+    circle.setAttribute("r", "6.5");
+    circle.setAttribute("fill", "none");
+    circle.setAttribute("stroke", "currentColor");
+    circle.setAttribute("stroke-width", "2.2");
+    svg.appendChild(circle);
+
+    const handle = document.createElementNS(ns, "line");
+    handle.setAttribute("x1", "16");
+    handle.setAttribute("y1", "16");
+    handle.setAttribute("x2", "20");
+    handle.setAttribute("y2", "20");
+    handle.setAttribute("stroke", "currentColor");
+    handle.setAttribute("stroke-width", "2.2");
+    handle.setAttribute("stroke-linecap", "round");
+    svg.appendChild(handle);
+    return svg;
+  }
+
+  if (name === "add") {
+    const v = document.createElementNS(ns, "line");
+    v.setAttribute("x1", "12");
+    v.setAttribute("y1", "6");
+    v.setAttribute("x2", "12");
+    v.setAttribute("y2", "18");
+    v.setAttribute("stroke", "currentColor");
+    v.setAttribute("stroke-width", "2.4");
+    v.setAttribute("stroke-linecap", "round");
+    svg.appendChild(v);
+
+    const h = document.createElementNS(ns, "line");
+    h.setAttribute("x1", "6");
+    h.setAttribute("y1", "12");
+    h.setAttribute("x2", "18");
+    h.setAttribute("y2", "12");
+    h.setAttribute("stroke", "currentColor");
+    h.setAttribute("stroke-width", "2.4");
+    h.setAttribute("stroke-linecap", "round");
+    svg.appendChild(h);
+    return svg;
+  }
+
+  const p1 = document.createElementNS(ns, "path");
+  p1.setAttribute("d", "M7 10l5 5 5-5");
+  p1.setAttribute("fill", "none");
+  p1.setAttribute("stroke", "currentColor");
+  p1.setAttribute("stroke-width", "2.4");
+  p1.setAttribute("stroke-linecap", "round");
+  p1.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(p1);
+  return svg;
+}
+
 function ensureUI() {
   if (rootEl) return;
   const existing = document.getElementById("ctb-root");
@@ -66,7 +130,6 @@ function ensureUI() {
     searchEl = existing.querySelector(".ctb-search");
     newTabEl = existing.querySelector(".ctb-new-tab");
     hideBarEl = existing.querySelector(".ctb-hide-bar");
-    hintEl = existing.querySelector(".ctb-hint");
     handleEl = existing.querySelector(".ctb-handle");
     searchToggleEl = existing.querySelector(".ctb-search-toggle");
     utilityRackEl = existing.querySelector(".ctb-row-utility");
@@ -84,9 +147,9 @@ function ensureUI() {
   utilityRackEl.className = "ctb-row-utility";
 
   searchToggleEl = document.createElement("button");
-  searchToggleEl.className = "ctb-button ctb-search-toggle";
+  searchToggleEl.className = "ctb-button ctb-search-toggle ctb-icon-btn";
   searchToggleEl.type = "button";
-  searchToggleEl.textContent = "⌕";
+  searchToggleEl.appendChild(makeIcon("search"));
   searchToggleEl.title = "Show/hide search";
   searchToggleEl.setAttribute("aria-label", "Show or hide search");
   searchToggleEl.addEventListener("click", () => {
@@ -104,28 +167,24 @@ function ensureUI() {
   utilityRackEl.appendChild(searchToggleEl);
 
   newTabEl = document.createElement("button");
-  newTabEl.className = "ctb-button ctb-new-tab";
-  newTabEl.textContent = "New Tab";
+  newTabEl.className = "ctb-button ctb-new-tab ctb-icon-btn";
+  newTabEl.appendChild(makeIcon("add"));
   newTabEl.addEventListener("click", async () => {
     await sendMessage({ type: "NEW_TAB" });
   });
-  newTabEl.setAttribute("aria-label", "Create new tab");
+  newTabEl.setAttribute("aria-label", "New tab");
+  newTabEl.title = "New tab";
   utilityRackEl.appendChild(newTabEl);
 
   hideBarEl = document.createElement("button");
-  hideBarEl.className = "ctb-button ctb-hide-bar";
-  hideBarEl.textContent = "Hide";
-  hideBarEl.title = "Hide MegaTabs (Alt+Shift+M to toggle)";
+  hideBarEl.className = "ctb-button ctb-hide-bar ctb-icon-btn";
+  hideBarEl.appendChild(makeIcon("hide"));
+  hideBarEl.title = "Hide BoomerTabs (Alt+Shift+B to toggle)";
   hideBarEl.addEventListener("click", () => {
     manuallyHidden = true;
     rootEl.dataset.hidden = "true";
   });
   utilityRackEl.appendChild(hideBarEl);
-
-  hintEl = document.createElement("span");
-  hintEl.className = "ctb-hint";
-  hintEl.textContent = "Alt+Shift+M";
-  utilityRackEl.appendChild(hintEl);
 
   searchRowEl = document.createElement("div");
   searchRowEl.className = "ctb-search-row";
@@ -151,7 +210,7 @@ function ensureUI() {
   handleEl = document.createElement("button");
   handleEl.className = "ctb-handle";
   handleEl.type = "button";
-  handleEl.textContent = "Show MegaTabs";
+  handleEl.textContent = "Show BoomerTabs";
   handleEl.addEventListener("click", () => {
     manuallyHidden = false;
     rootEl.dataset.hidden = "false";
@@ -193,15 +252,22 @@ function shouldShowByMode() {
 function applyShellSettings() {
   const settings = state.settings;
   rootEl.dataset.position = settings.position || "top";
+  const zoomFactor = Math.max(0.25, Number(state.zoomFactor || 1));
+  const zoomInverse = 1 / zoomFactor;
 
   const shell = rootEl.querySelector(".ctb-shell");
   const rowCount = Math.max(1, Number(settings.rowCount || 1));
-  const controlsVisible = settings.showSearchBar || settings.showNewTabButton;
-  const dynamicVh = Math.max(6, Number(settings.barHeightPercent || 12)) + (rowCount - 1) * 4;
-  const minPx = (controlsVisible ? 34 : 10) + rowCount * 44 + 14;
-  shell.style.height = `${dynamicVh}vh`;
-  shell.style.maxHeight = `${Math.max(260, minPx + 40)}px`;
+  const baseVh = Math.max(6, Number(settings.barHeightPercent || 12)) + (rowCount - 1) * 4;
+  const searchRowPx = settings.showSearchBar && searchExpanded ? 40 : 0;
+  const minPx = rowCount * 46 + searchRowPx + 14;
+  const neededVh = (minPx / Math.max(window.innerHeight, 1)) * 100 + 1.5;
+  const maxVh = Math.min(95, Math.max(baseVh, neededVh));
+  // Keep bar tight to content; cap overall height instead of forcing fixed height.
+  shell.style.height = "auto";
+  shell.style.maxHeight = `${maxVh}vh`;
   shell.style.minHeight = `${minPx}px`;
+  shell.style.overflowY = "auto";
+  shell.style.overflowX = "hidden";
   shell.style.background = settings.backgroundColor || "#1e1e1e";
   shell.style.color = settings.textColor || "#e6e6e6";
 
@@ -210,11 +276,12 @@ function applyShellSettings() {
   rootEl.style.setProperty("--ctb-active", settings.activeTabHighlight || "#333333");
   rootEl.style.setProperty("--ctb-scrollbar-thumb", settings.activeTabHighlight || "rgba(255,255,255,0.28)");
   rootEl.style.setProperty("--ctb-scrollbar-track", "rgba(255,255,255,0.08)");
+  rootEl.style.setProperty("--ctb-zoom-factor", String(zoomFactor));
+  rootEl.style.setProperty("--ctb-zoom-inverse", String(zoomInverse));
 
   searchToggleEl.style.display = settings.showSearchBar ? "" : "none";
   newTabEl.style.display = settings.showNewTabButton ? "" : "none";
   hideBarEl.style.display = "";
-  hintEl.style.display = "";
   if (!settings.showSearchBar) {
     searchExpanded = false;
   }
@@ -282,10 +349,12 @@ function render() {
   clearDropMarkers();
 
   const groupsById = new Map((state.groups || []).map((g) => [g.id, g]));
-  const sortedTabs = sortTabs(state.tabs || []).filter(tabMatchesSearch);
+  const sortedAllTabs = sortTabs(state.tabs || []);
+  const sortedTabs = sortedAllTabs.filter(tabMatchesSearch);
   const rowCount = Math.max(1, Number(state.settings.rowCount || 1));
-  const tabsPerRow = Math.max(4, Number(state.settings.tabsPerRow || 12));
-  const rows = distributeTabsIntoRows(sortedTabs, rowCount, tabsPerRow);
+  const tabsPerRow = Math.max(1, Number(state.settings.tabsPerRow || 12));
+  const rowPlan = buildRowPlan(sortedTabs, rowCount, tabsPerRow);
+  const rowPlanAll = buildRowPlan(sortedAllTabs, rowCount, tabsPerRow);
 
   rowsEl.textContent = "";
   if (sortedTabs.length === 0) {
@@ -311,8 +380,42 @@ function render() {
       { passive: false }
     );
 
-    const rowTabs = rows[i] || [];
-    if (rowTabs.length === 0) continue;
+    const rowTabs = rowPlan.rows[i] || [];
+    rowScroll.addEventListener("dragover", (event) => {
+      if (draggingTabId == null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      rowScroll.classList.add("ctb-row-drop-target");
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    });
+    rowScroll.addEventListener("dragleave", () => {
+      rowScroll.classList.remove("ctb-row-drop-target");
+    });
+    rowScroll.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      rowScroll.classList.remove("ctb-row-drop-target");
+      if (draggingTabId == null) return;
+      await moveDraggedTabToRow(
+        draggingTabId,
+        i,
+        rowPlanAll.rowStarts,
+        rowPlanAll.rowLengths,
+        sortedAllTabs
+      );
+      clearDropMarkers();
+    });
+    if (rowTabs.length === 0) {
+      const rowEmpty = document.createElement("div");
+      rowEmpty.className = "ctb-row-empty";
+      rowEmpty.textContent = "Drop tabs here";
+      rowScroll.appendChild(rowEmpty);
+      if (i === 0) {
+        rowScroll.appendChild(utilityRackEl);
+      }
+      rowsEl.appendChild(rowScroll);
+      continue;
+    }
 
     const rowGroups = groupTabs(rowTabs, groupsById);
     for (const group of rowGroups) {
@@ -361,11 +464,11 @@ function render() {
 
       // Compact group UX for multi-row mode: a light chip instead of repeated full headers.
       if (state.settings.showGroups && !useFullGroupHeader) {
-        const chip = document.createElement("span");
-        chip.className = "ctb-group-chip";
-        const label = group.groupId === GROUP_NONE ? "Ungrouped" : group.title || "Group";
-        chip.textContent = `${label} (${group.tabs.length})`;
         if (group.groupId !== GROUP_NONE) {
+          const chip = document.createElement("span");
+          chip.className = "ctb-group-chip";
+          const label = group.title || "Group";
+          chip.textContent = `${label} (${group.tabs.length})`;
           const toggle = document.createElement("button");
           toggle.className = "ctb-group-toggle";
           toggle.textContent = group.collapsed ? "Expand" : "Collapse";
@@ -377,12 +480,12 @@ function render() {
             });
           });
           chip.appendChild(toggle);
+          groupTabsEl.appendChild(chip);
         }
-        groupTabsEl.appendChild(chip);
       }
 
       for (const tab of visibleTabs) {
-        groupTabsEl.appendChild(renderTab(tab));
+        groupTabsEl.appendChild(renderTab(tab, i));
       }
       groupEl.appendChild(groupTabsEl);
       rowScroll.appendChild(groupEl);
@@ -405,32 +508,51 @@ function render() {
   }
 }
 
-function distributeTabsIntoRows(tabs, rowCount, tabsPerRow) {
+function buildRowPlan(tabs, rowCount, tabsPerRow) {
   const rows = Array.from({ length: rowCount }, () => []);
-  if (tabs.length === 0) return rows;
-  let nextRow = 0;
-  for (const tab of tabs) {
-    let placed = false;
-    for (let step = 0; step < rowCount; step += 1) {
-      const idx = (nextRow + step) % rowCount;
-      if (rows[idx].length < tabsPerRow) {
-        rows[idx].push(tab);
-        nextRow = (idx + 1) % rowCount;
-        placed = true;
-        break;
-      }
+  const rowLengths = computeRowLengths(tabs.length, rowCount, tabsPerRow);
+  const rowStarts = [];
+
+  let start = 0;
+  for (let i = 0; i < rowCount; i += 1) {
+    rowStarts.push(start);
+    const len = rowLengths[i] || 0;
+    if (len > 0) {
+      rows[i] = tabs.slice(start, start + len);
     }
-    if (!placed) {
-      // All rows reached tabsPerRow target: keep balancing by shortest row.
-      let target = 0;
-      for (let i = 1; i < rowCount; i += 1) {
-        if (rows[i].length < rows[target].length) target = i;
-      }
-      rows[target].push(tab);
-      nextRow = (target + 1) % rowCount;
-    }
+    start += len;
   }
-  return rows;
+
+  return { rows, rowStarts, rowLengths };
+}
+
+function computeRowLengths(totalTabs, rowCount, tabsPerRow) {
+  const lengths = Array.from({ length: rowCount }, () => 0);
+  if (totalTabs <= 0) return lengths;
+
+  const capacity = rowCount * tabsPerRow;
+  if (totalTabs <= capacity) {
+    // Fill rows as evenly as possible while honoring max tabs per row.
+    let remaining = totalTabs;
+    for (let i = 0; i < rowCount; i += 1) {
+      if (remaining <= 0) break;
+      const rowsLeft = rowCount - i;
+      const ideal = Math.ceil(remaining / rowsLeft);
+      const take = Math.min(tabsPerRow, ideal);
+      lengths[i] = take;
+      remaining -= take;
+    }
+    return lengths;
+  }
+
+  // Overflow mode: fill earlier rows to configured cap; last row holds remainder.
+  let remaining = totalTabs;
+  for (let i = 0; i < rowCount; i += 1) {
+    const take = i === rowCount - 1 ? remaining : Math.min(tabsPerRow, remaining);
+    lengths[i] = take;
+    remaining -= take;
+  }
+  return lengths;
 }
 
 function groupColor(color) {
@@ -448,10 +570,11 @@ function groupColor(color) {
   return colors[color] || colors.grey;
 }
 
-function renderTab(tab) {
+function renderTab(tab, rowIndex) {
   const tabEl = document.createElement("div");
   tabEl.className = "ctb-tab";
   tabEl.dataset.tabId = String(tab.id);
+  tabEl.dataset.row = String(rowIndex);
   tabEl.setAttribute("role", "button");
   tabEl.setAttribute("tabindex", "0");
 
@@ -472,12 +595,12 @@ function renderTab(tab) {
 
   const icon = document.createElement("img");
   icon.className = "ctb-tab-icon";
-  icon.style.width = `${Math.max(12, iconSize)}px`;
-  icon.style.height = `${Math.max(12, iconSize)}px`;
+  icon.style.width = `${Math.max(16, iconSize)}px`;
+  icon.style.height = `${Math.max(16, iconSize)}px`;
   icon.alt = "";
-  icon.src = tab.favIconUrl || faviconURL(tab.url, Math.max(16, iconSize));
+  icon.src = tab.favIconUrl || faviconURL(tab.url, Math.max(20, iconSize));
   icon.onerror = () => {
-    icon.src = faviconURL(tab.url, Math.max(16, iconSize));
+    icon.src = faviconURL(tab.url, Math.max(20, iconSize));
   };
   tabEl.appendChild(icon);
 
@@ -534,6 +657,7 @@ function renderTab(tab) {
 
   tabEl.addEventListener("dragstart", (event) => {
     draggingTabId = tab.id;
+    draggingFromRow = Number(tabEl.dataset.row);
     tabEl.classList.add("ctb-dragging");
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
@@ -544,9 +668,22 @@ function renderTab(tab) {
   tabEl.addEventListener("dragover", (event) => {
     if (draggingTabId == null || draggingTabId === tab.id) return;
     event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    clearDropMarkers();
+    const targetRow = Number(tabEl.dataset.row);
+    const isCrossRow = Number.isFinite(draggingFromRow) && draggingFromRow !== targetRow;
     const rect = tabEl.getBoundingClientRect();
+    const middleStart = rect.left + rect.width * 0.25;
+    const middleEnd = rect.left + rect.width * 0.75;
+    const centerIntent = event.clientX >= middleStart && event.clientX <= middleEnd;
+    if (!(isCrossRow && centerIntent)) {
+      event.stopPropagation();
+    }
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    if (isCrossRow && centerIntent) {
+      // In cross-row drags, center hover means "move into row", not "insert before/after this tab".
+      clearDropMarkers();
+      return;
+    }
+    clearDropMarkers();
     const placeAfter = event.clientX > rect.left + rect.width / 2;
     tabEl.classList.add(placeAfter ? "ctb-drop-after" : "ctb-drop-before");
   });
@@ -556,12 +693,25 @@ function renderTab(tab) {
   });
 
   tabEl.addEventListener("drop", async (event) => {
-    event.preventDefault();
     if (draggingTabId == null || draggingTabId === tab.id) {
+      event.preventDefault();
+      event.stopPropagation();
       clearDropMarkers();
       return;
     }
+    const targetRow = Number(tabEl.dataset.row);
     const rect = tabEl.getBoundingClientRect();
+    const isCrossRow = Number.isFinite(draggingFromRow) && draggingFromRow !== targetRow;
+    const middleStart = rect.left + rect.width * 0.25;
+    const middleEnd = rect.left + rect.width * 0.75;
+    const centerIntent = event.clientX >= middleStart && event.clientX <= middleEnd;
+    if (isCrossRow && centerIntent) {
+      // Let row-level drop handler process this as a row move.
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
     const placeAfter = event.clientX > rect.left + rect.width / 2;
     await moveDraggedTabToTarget(draggingTabId, tab.id, placeAfter);
     clearDropMarkers();
@@ -569,6 +719,7 @@ function renderTab(tab) {
 
   tabEl.addEventListener("dragend", () => {
     draggingTabId = null;
+    draggingFromRow = null;
     clearDropMarkers();
     tabEl.classList.remove("ctb-dragging");
   });
@@ -582,19 +733,56 @@ function clearDropMarkers() {
   for (const el of marked) {
     el.classList.remove("ctb-drop-before", "ctb-drop-after", "ctb-dragging");
   }
+  const rowMarked = rootEl?.querySelectorAll(".ctb-row-drop-target");
+  if (rowMarked) {
+    for (const el of rowMarked) {
+      el.classList.remove("ctb-row-drop-target");
+    }
+  }
 }
 
 async function moveDraggedTabToTarget(sourceTabId, targetTabId, placeAfter) {
-  const source = state.tabs.find((t) => t.id === sourceTabId);
-  const target = state.tabs.find((t) => t.id === targetTabId);
-  if (!source || !target) return;
-  // Keep reorder predictable inside same pinned/regular section.
-  if (source.pinned !== target.pinned) return;
+  const ordered = sortTabs(state.tabs || []);
+  const targetPos = ordered.findIndex((t) => t.id === targetTabId);
+  if (targetPos < 0) return;
+  const desiredPos = targetPos + (placeAfter ? 1 : 0);
+  await moveTabToOrderedPosition(sourceTabId, desiredPos, ordered);
+}
 
-  let targetIndex = target.index + (placeAfter ? 1 : 0);
-  if (source.index < targetIndex) {
-    targetIndex -= 1;
+async function moveDraggedTabToRow(sourceTabId, rowIndex, rowStarts, rowLengths, sortedTabs) {
+  if (!Array.isArray(sortedTabs) || sortedTabs.length === 0) return;
+  if (rowIndex < 0 || rowIndex >= rowStarts.length) return;
+  const desiredPos = Number(rowStarts[rowIndex] || 0) + Number(rowLengths[rowIndex] || 0);
+  await moveTabToOrderedPosition(sourceTabId, desiredPos, sortedTabs);
+}
+
+async function moveTabToOrderedPosition(sourceTabId, desiredPosInFullOrder, orderedTabs) {
+  const sourcePos = orderedTabs.findIndex((t) => t.id === sourceTabId);
+  if (sourcePos < 0) return;
+  const source = orderedTabs[sourcePos];
+
+  const fullMax = orderedTabs.length;
+  const boundedFullPos = Math.max(0, Math.min(fullMax, Number(desiredPosInFullOrder)));
+  let desiredPosWithoutSource =
+    boundedFullPos - (sourcePos < boundedFullPos ? 1 : 0);
+
+  const withoutSource = orderedTabs.filter((t) => t.id !== sourceTabId);
+  const pinnedCount = withoutSource.reduce((acc, tab) => acc + (tab.pinned ? 1 : 0), 0);
+  if (source.pinned) {
+    desiredPosWithoutSource = Math.min(desiredPosWithoutSource, pinnedCount);
+  } else {
+    desiredPosWithoutSource = Math.max(desiredPosWithoutSource, pinnedCount);
   }
+  desiredPosWithoutSource = Math.max(0, Math.min(withoutSource.length, desiredPosWithoutSource));
+
+  let targetIndex = -1;
+  if (desiredPosWithoutSource < withoutSource.length) {
+    targetIndex = withoutSource[desiredPosWithoutSource].index;
+    if (source.index < targetIndex) {
+      targetIndex -= 1;
+    }
+  }
+
   if (targetIndex === source.index) return;
   await sendMessage({ type: "MOVE_TAB", tabId: source.id, index: targetIndex });
   focusedTabId = source.id;
@@ -735,7 +923,7 @@ function clearPageOffset() {
 function handleGlobalKeydown(event) {
   if (!state.settings?.enabled) return;
   if (!rootEl || rootEl.style.display === "none") return;
-  if (event.altKey && event.shiftKey && event.key.toLowerCase() === "m") {
+  if (event.altKey && event.shiftKey && event.key.toLowerCase() === "b") {
     manuallyHidden = !manuallyHidden;
     if (manuallyHidden) {
       rootEl.dataset.hidden = "true";

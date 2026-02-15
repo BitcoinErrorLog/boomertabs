@@ -18,6 +18,8 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ctb-text);
   pointer-events: none;
+  --ctb-zoom-factor: 1;
+  --ctb-zoom-inverse: 1;
 }
 
 #ctb-root[data-position="top"] {
@@ -29,16 +31,16 @@
 }
 
 #ctb-root[data-hidden="true"] .ctb-shell {
-  transform: translateY(-110%);
+  --ctb-hide-shift: -110%;
 }
 
 #ctb-root[data-position="bottom"][data-hidden="true"] .ctb-shell {
-  transform: translateY(110%);
+  --ctb-hide-shift: 110%;
 }
 
 #ctb-root .ctb-shell {
   pointer-events: auto;
-  width: 100%;
+  width: calc(100% * var(--ctb-zoom-factor));
   background: var(--ctb-bg);
   color: var(--ctb-text);
   border-bottom: 1px solid var(--ctb-border);
@@ -47,7 +49,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transform: translateY(0);
+  transform: translateY(var(--ctb-hide-shift, 0%)) scale(var(--ctb-zoom-inverse));
+  transform-origin: left top;
   transition: transform 160ms ease-out, opacity 160ms ease-out;
   will-change: transform;
 }
@@ -61,17 +64,12 @@
 #ctb-root[data-position="bottom"] .ctb-shell {
   border-bottom: none;
   border-top: 1px solid var(--ctb-border);
-}
-
-#ctb-root .ctb-hint {
-  font-size: 11px;
-  color: var(--ctb-muted);
-  white-space: nowrap;
+  transform-origin: left bottom;
 }
 
 #ctb-root .ctb-search {
-  width: min(420px, 62vw);
-  min-width: 160px;
+  width: 100%;
+  min-width: 0;
   background: rgba(0, 0, 0, 0.26);
   color: var(--ctb-text);
   border: 1px solid var(--ctb-border);
@@ -83,7 +81,7 @@
 
 #ctb-root .ctb-search-row {
   display: flex;
-  justify-content: flex-end;
+  justify-content: stretch;
 }
 
 #ctb-root .ctb-search-row[hidden] {
@@ -94,19 +92,47 @@
   background: rgba(255, 255, 255, 0.08);
   color: var(--ctb-text);
   border: 1px solid var(--ctb-border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 9px;
   cursor: pointer;
   font-size: 12px;
 }
 
 #ctb-root .ctb-search-toggle {
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
   padding: 0;
-  font-size: 15px;
-  line-height: 1;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#ctb-root .ctb-icon-btn {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  padding: 0;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#ctb-root .ctb-hide-bar {
+  padding: 0;
+}
+
+#ctb-root .ctb-icon-svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+#ctb-root .ctb-search-toggle .ctb-icon-svg {
+  width: 30px;
+  height: 30px;
 }
 
 #ctb-root .ctb-rows {
@@ -120,29 +146,22 @@
   gap: 6px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 1px;
-  scrollbar-color: var(--ctb-scrollbar-thumb) var(--ctb-scrollbar-track);
   align-items: center;
 }
 
+#ctb-root .ctb-row-scroll.ctb-row-drop-target {
+  outline: 1px dashed rgba(122, 183, 255, 0.7);
+  outline-offset: -1px;
+  border-radius: 6px;
+}
+
 #ctb-root .ctb-row-scroll::-webkit-scrollbar {
-  height: 8px;
-}
-
-#ctb-root .ctb-row-scroll::-webkit-scrollbar-track {
-  background: var(--ctb-scrollbar-track);
-  border-radius: 6px;
-}
-
-#ctb-root .ctb-row-scroll::-webkit-scrollbar-thumb {
-  background: var(--ctb-scrollbar-thumb);
-  border-radius: 6px;
-}
-
-#ctb-root .ctb-row-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.42);
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 #ctb-root .ctb-group {
@@ -220,9 +239,9 @@
   right: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   background: linear-gradient(to left, var(--ctb-bg) 75%, rgba(0, 0, 0, 0));
-  padding-left: 10px;
+  padding-left: 16px;
 }
 
 #ctb-root .ctb-tab.ctb-active {
@@ -282,9 +301,9 @@
   color: var(--ctb-text);
   cursor: pointer;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1;
-  padding: 2px 4px;
+  padding: 3px 6px;
   flex: 0 0 auto;
 }
 

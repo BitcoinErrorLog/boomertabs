@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS = {
   tabMaxWidth: 250,
   rowCount: 1,
   tabsPerRow: 12,
-  iconSize: 24,
+  iconSize: 28,
   labelFontSize: 13,
   padding: 8,
   showCloseButton: true,
@@ -62,7 +62,7 @@ function normalizeSettings(stored) {
     tabMinWidth: clampNumber(stored.tabMinWidth, 56, 500, DEFAULT_SETTINGS.tabMinWidth),
     tabMaxWidth: clampNumber(stored.tabMaxWidth, 80, 800, DEFAULT_SETTINGS.tabMaxWidth),
     rowCount: clampNumber(stored.rowCount, 1, 6, DEFAULT_SETTINGS.rowCount),
-    tabsPerRow: clampNumber(stored.tabsPerRow, 4, 50, DEFAULT_SETTINGS.tabsPerRow),
+    tabsPerRow: clampNumber(stored.tabsPerRow, 1, 50, DEFAULT_SETTINGS.tabsPerRow),
     iconSize: clampNumber(stored.iconSize, 12, 64, DEFAULT_SETTINGS.iconSize),
     labelFontSize: clampNumber(stored.labelFontSize, 10, 24, DEFAULT_SETTINGS.labelFontSize),
     padding: clampNumber(stored.padding, 2, 24, DEFAULT_SETTINGS.padding),
@@ -103,6 +103,17 @@ async function getWindowState(windowId) {
     return win.state || "normal";
   } catch (_error) {
     return "normal";
+  }
+}
+
+async function getTabZoom(tabId) {
+  if (!assertTabId(tabId)) return 1;
+  try {
+    const zoom = await chrome.tabs.getZoom(tabId);
+    if (!Number.isFinite(zoom) || zoom <= 0) return 1;
+    return zoom;
+  } catch (_error) {
+    return 1;
   }
 }
 
@@ -158,7 +169,11 @@ async function broadcastWindowState(windowId) {
       windowTabs.map(async (tab) => {
         if (!tab.id) return;
         try {
-          await chrome.tabs.sendMessage(tab.id, { type: "STATE_UPDATE", payload: state });
+          const zoomFactor = await getTabZoom(tab.id);
+          await chrome.tabs.sendMessage(tab.id, {
+            type: "STATE_UPDATE",
+            payload: { ...state, zoomFactor }
+          });
         } catch (_error) {
           // Not all tabs run our content script (e.g. restricted pages).
         }
@@ -209,6 +224,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "GET_STATE") {
       const windowId = senderWindowId || (await chrome.windows.getCurrent()).id;
       const payload = await buildWindowState(windowId);
+      payload.zoomFactor = await getTabZoom(senderTab?.id);
       sendResponse({ ok: true, payload });
       return;
     }
@@ -292,6 +308,13 @@ chrome.tabs.onUpdated.addListener((_tabId, _changeInfo, tab) => scheduleBroadcas
 chrome.tabs.onMoved.addListener((_tabId, moveInfo) => scheduleBroadcast(moveInfo.windowId));
 chrome.tabs.onAttached.addListener((_tabId, attachInfo) => scheduleBroadcast(attachInfo.newWindowId));
 chrome.tabs.onDetached.addListener((_tabId, detachInfo) => scheduleBroadcast(detachInfo.oldWindowId));
+chrome.tabs.onZoomChange.addListener((zoomChangeInfo) => {
+  if (!assertTabId(zoomChangeInfo.tabId)) return;
+  chrome.tabs
+    .get(zoomChangeInfo.tabId)
+    .then((tab) => scheduleBroadcast(tab.windowId))
+    .catch(() => {});
+});
 
 chrome.tabGroups.onCreated.addListener((group) => scheduleBroadcast(group.windowId));
 chrome.tabGroups.onUpdated.addListener((group) => scheduleBroadcast(group.windowId));
