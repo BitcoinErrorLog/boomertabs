@@ -1,6 +1,103 @@
 const GROUP_NONE = -1;
 const UPDATE_DEBOUNCE_MS = 100;
 
+/* Full stylesheet inlined for Shadow DOM isolation. Host-page CSS cannot reach inside. */
+const CTB_SHADOW_CSS = `
+#ctb-root {
+  all: initial;
+  position: relative;
+  left: 0;
+  right: 0;
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #e6e6e6;
+  pointer-events: none;
+  --ctb-bg: #1e1e1e;
+  --ctb-text: #e6e6e6;
+  --ctb-active: #333333;
+  --ctb-border: rgba(255,255,255,0.14);
+  --ctb-muted: rgba(255,255,255,0.6);
+  --ctb-radius: 8px;
+  --ctb-zoom-factor: 1;
+  --ctb-zoom-inverse: 1;
+}
+#ctb-root, #ctb-root * { box-sizing: border-box; }
+#ctb-root * { font-family: inherit; letter-spacing: normal; text-transform: none; line-height: 1.2; margin: 0; padding: 0; }
+#ctb-root button, #ctb-root input, #ctb-root select { font: inherit; color: inherit; }
+#ctb-root button { appearance: none; -webkit-appearance: none; border: none; background: none; }
+#ctb-root img { border: none; }
+#ctb-root[data-hidden="true"] .ctb-shell { --ctb-hide-shift: -110%; }
+#ctb-root[data-position="bottom"][data-hidden="true"] .ctb-shell { --ctb-hide-shift: 110%; }
+#ctb-root .ctb-shell {
+  pointer-events: auto;
+  width: calc(100% * var(--ctb-zoom-factor));
+  background: var(--ctb-bg);
+  color: var(--ctb-text);
+  border-bottom: 1px solid var(--ctb-border);
+  box-sizing: border-box;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transform: translateY(var(--ctb-hide-shift, 0%)) scale(var(--ctb-zoom-inverse));
+  transform-origin: left top;
+  transition: transform 160ms ease-out, opacity 160ms ease-out;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+@media (prefers-reduced-motion: reduce) { #ctb-root .ctb-shell { transition: none; } }
+#ctb-root[data-position="bottom"] .ctb-shell { border-bottom: none; border-top: 1px solid var(--ctb-border); transform-origin: left bottom; }
+#ctb-root .ctb-search { width: 100%; min-width: 0; background: rgba(0,0,0,0.26); color: var(--ctb-text); border: 1px solid var(--ctb-border); border-radius: 6px; padding: 6px 8px; font-size: 13px; box-sizing: border-box; }
+#ctb-root .ctb-search-row { display: flex; justify-content: stretch; }
+#ctb-root .ctb-search-row[hidden] { display: none; }
+#ctb-root .ctb-button { background: rgba(255,255,255,0.08); color: var(--ctb-text); border: 1px solid var(--ctb-border); border-radius: 8px; padding: 6px 9px; cursor: pointer; font-size: 12px; }
+#ctb-root .ctb-search-toggle { width: 52px; min-width: 52px; height: 52px; padding: 0; line-height: 0; display: inline-flex; align-items: center; justify-content: center; }
+#ctb-root .ctb-icon-btn { width: 48px; min-width: 48px; height: 48px; padding: 0; line-height: 0; display: inline-flex; align-items: center; justify-content: center; }
+#ctb-root .ctb-hide-bar { padding: 0; }
+#ctb-root .ctb-icon-svg { width: 26px; height: 26px; display: block; }
+#ctb-root .ctb-search-toggle .ctb-icon-svg { width: 30px; height: 30px; }
+#ctb-root .ctb-rows { display: flex; flex-direction: column; gap: 6px; }
+#ctb-root .ctb-row-scroll { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 1px; align-items: center; }
+#ctb-root .ctb-row-scroll.ctb-row-drop-target { outline: 1px dashed rgba(122,183,255,0.7); outline-offset: -1px; border-radius: 6px; }
+#ctb-root .ctb-row-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+#ctb-root .ctb-group { display: flex; flex-direction: column; min-width: max-content; gap: 4px; }
+#ctb-root .ctb-group-header { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ctb-muted); user-select: none; white-space: nowrap; }
+#ctb-root .ctb-group-header[draggable="true"], #ctb-root .ctb-group-chip[draggable="true"] { cursor: grab; }
+#ctb-root .ctb-group-header[draggable="true"]:active, #ctb-root .ctb-group-chip[draggable="true"]:active { cursor: grabbing; }
+#ctb-root .ctb-group-toggle { border: 1px solid var(--ctb-border); background: rgba(255,255,255,0.08); color: var(--ctb-text); border-radius: 4px; font-size: 10px; padding: 0 6px; cursor: pointer; }
+#ctb-root .ctb-group-tabs { display: flex; gap: 6px; min-width: max-content; align-items: center; }
+#ctb-root .ctb-group-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; border: 1px solid color-mix(in srgb, var(--ctb-group-color, #666) 72%, #000 28%); border-radius: 10px; padding: 6px 10px 6px 12px; font-size: 12px; color: #ffffff; background: color-mix(in srgb, var(--ctb-group-color, #666) 58%, #111 42%); white-space: nowrap; cursor: pointer; max-width: 260px; text-align: left; }
+#ctb-root .ctb-group-chip:hover { filter: brightness(1.08); }
+#ctb-root .ctb-group-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ctb-root .ctb-group-chip-chevron { margin-left: auto; font-size: 14px; line-height: 1; opacity: 0.9; }
+#ctb-root .ctb-group.ctb-group-dragging { opacity: 0.55; }
+#ctb-root .ctb-group.ctb-group-drop-before, #ctb-root .ctb-group.ctb-group-drop-after { position: relative; }
+#ctb-root .ctb-group.ctb-group-drop-before::before, #ctb-root .ctb-group.ctb-group-drop-after::after { content: ""; position: absolute; top: 2px; bottom: 2px; width: 3px; background: #7ab7ff; border-radius: 2px; }
+#ctb-root .ctb-group.ctb-group-drop-before::before { left: -3px; }
+#ctb-root .ctb-group.ctb-group-drop-after::after { right: -3px; }
+#ctb-root .ctb-tab { display: inline-flex; align-items: center; overflow: hidden; flex: 0 0 auto; border: 1px solid var(--ctb-border); border-radius: var(--ctb-radius); background: rgba(255,255,255,0.08); min-width: 100px; max-width: 260px; box-sizing: border-box; cursor: pointer; user-select: none; position: relative; padding: 7px 8px; gap: 8px; }
+#ctb-root .ctb-row-utility { margin-left: auto; position: sticky; right: 0; display: inline-flex; align-items: center; gap: 10px; background: linear-gradient(to left, var(--ctb-bg) 75%, rgba(0,0,0,0)); padding-left: 16px; }
+#ctb-root .ctb-tab.ctb-active { background: var(--ctb-active); }
+#ctb-root .ctb-tab.ctb-focused { outline: 2px solid rgba(120,180,255,0.8); outline-offset: 0; }
+#ctb-root .ctb-tab.ctb-dragging { opacity: 0.5; }
+#ctb-root .ctb-tab.ctb-drop-before::before, #ctb-root .ctb-tab.ctb-drop-after::after { content: ""; position: absolute; top: 2px; bottom: 2px; width: 3px; background: #7ab7ff; border-radius: 2px; }
+#ctb-root .ctb-tab.ctb-drop-before::before { left: 1px; }
+#ctb-root .ctb-tab.ctb-drop-after::after { right: 1px; }
+#ctb-root .ctb-tab-icon { display: block; width: 16px; height: 16px; flex: 0 0 auto; }
+#ctb-root .ctb-tab-label { display: block; flex: 1 1 auto; min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ctb-text); font-size: inherit; line-height: 1.2; }
+#ctb-root .ctb-tab-metadata { color: var(--ctb-muted); font-size: 11px; flex: 0 0 auto; }
+#ctb-root .ctb-tab-close { border: none; background: transparent; color: var(--ctb-text); cursor: pointer; border-radius: 4px; font-size: 16px; line-height: 1; padding: 3px 6px; flex: 0 0 auto; }
+#ctb-root .ctb-tab-close:hover { background: rgba(255,255,255,0.16); }
+#ctb-root .ctb-empty { color: var(--ctb-muted); font-size: 12px; padding: 4px 2px; }
+#ctb-root .ctb-row-empty { color: var(--ctb-muted); font-size: 11px; padding: 4px 0; }
+#ctb-root .ctb-context { position: fixed; min-width: 160px; border: 1px solid var(--ctb-border); background: #181818; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); padding: 6px; display: none; flex-direction: column; gap: 4px; }
+#ctb-root .ctb-handle { position: fixed; left: 10px; top: 0; pointer-events: auto; border: 1px solid var(--ctb-border); border-radius: 0 0 8px 8px; background: var(--ctb-bg); color: var(--ctb-text); padding: 4px 8px; font-size: 11px; cursor: pointer; display: none; }
+#ctb-root[data-position="bottom"] .ctb-handle { top: auto; bottom: 0; border-radius: 8px 8px 0 0; }
+#ctb-root[data-hidden="true"] .ctb-handle { display: inline-flex; align-items: center; gap: 6px; }
+#ctb-root .ctb-context button { text-align: left; border: none; background: transparent; color: var(--ctb-text); border-radius: 6px; cursor: pointer; padding: 6px 8px; font-size: 12px; }
+#ctb-root .ctb-context button:hover { background: rgba(255,255,255,0.12); }
+`;
+
 let state = {
   settings: null,
   tabs: [],
@@ -32,6 +129,8 @@ let draggingTabId = null;
 let draggingFromRow = null;
 let draggingGroupTabIds = null;
 let searchExpanded = false;
+const tabElCache = new Map(); // tabId -> { el, imgEl, labelEl, metaEl, closeBtnEl }
+let lastSettingsKey = "";
 
 function setLocalGroupCollapsed(groupId, collapsed) {
   const nextGroups = (state.groups || []).map((group) =>
@@ -187,28 +286,57 @@ function makeIcon(name) {
   return svg;
 }
 
+let shadowHost = null;
+let shadowRoot = null;
+let overlayHovered = false;
+
 function ensureUI() {
   if (rootEl) return;
-  const existing = document.getElementById("ctb-root");
-  if (existing) {
-    rootEl = existing;
-    rowsEl = existing.querySelector(".ctb-rows");
-    searchRowEl = existing.querySelector(".ctb-search-row");
-    searchEl = existing.querySelector(".ctb-search");
-    newTabEl = existing.querySelector(".ctb-new-tab");
-    hideBarEl = existing.querySelector(".ctb-hide-bar");
-    handleEl = existing.querySelector(".ctb-handle");
-    searchToggleEl = existing.querySelector(".ctb-search-toggle");
-    utilityRackEl = existing.querySelector(".ctb-row-utility");
-    contextMenuEl = existing.querySelector(".ctb-context");
-    return;
+
+  // Check for existing shadow host first.
+  const existingHost = document.getElementById("ctb-shadow-host");
+  if (existingHost && existingHost.shadowRoot) {
+    shadowHost = existingHost;
+    shadowRoot = existingHost.shadowRoot;
+    rootEl = shadowRoot.querySelector("#ctb-root");
+    if (rootEl) {
+      rowsEl = rootEl.querySelector(".ctb-rows");
+      searchRowEl = rootEl.querySelector(".ctb-search-row");
+      searchEl = rootEl.querySelector(".ctb-search");
+      newTabEl = rootEl.querySelector(".ctb-new-tab");
+      hideBarEl = rootEl.querySelector(".ctb-hide-bar");
+      handleEl = rootEl.querySelector(".ctb-handle");
+      searchToggleEl = rootEl.querySelector(".ctb-search-toggle");
+      utilityRackEl = rootEl.querySelector(".ctb-row-utility");
+      contextMenuEl = rootEl.querySelector(".ctb-context");
+      return;
+    }
   }
+
+  // Create shadow host as a fixed container.
+  shadowHost = document.createElement("div");
+  shadowHost.id = "ctb-shadow-host";
+  shadowHost.style.cssText =
+    "all:initial !important;position:fixed !important;left:0 !important;right:0 !important;z-index:2147483647 !important;pointer-events:none !important;";
+  document.documentElement.appendChild(shadowHost);
+
+  // Attach closed shadow root so host page JS also can't reach in.
+  shadowRoot = shadowHost.attachShadow({ mode: "open" });
+
+  // Inline the full stylesheet inside the shadow root.
+  const style = document.createElement("style");
+  style.textContent = CTB_SHADOW_CSS;
+  shadowRoot.appendChild(style);
+
   rootEl = document.createElement("div");
   rootEl.id = "ctb-root";
   rootEl.dataset.hidden = "false";
 
   const shell = document.createElement("div");
   shell.className = "ctb-shell";
+  shell.addEventListener("transitionstart", () => { shell.style.willChange = "transform"; });
+  shell.addEventListener("transitionend", () => { shell.style.willChange = ""; });
+  shell.addEventListener("transitioncancel", () => { shell.style.willChange = ""; });
 
   utilityRackEl = document.createElement("div");
   utilityRackEl.className = "ctb-row-utility";
@@ -293,7 +421,10 @@ function ensureUI() {
   rootEl.appendChild(shell);
   rootEl.appendChild(handleEl);
   rootEl.appendChild(contextMenuEl);
-  document.documentElement.appendChild(rootEl);
+  shadowRoot.appendChild(rootEl);
+
+  rootEl.addEventListener("mouseenter", () => { overlayHovered = true; });
+  rootEl.addEventListener("mouseleave", () => { overlayHovered = false; });
 
   document.addEventListener("click", () => hideContextMenu(), true);
   document.addEventListener("keydown", handleGlobalKeydown, true);
@@ -318,7 +449,13 @@ function shouldShowByMode() {
 
 function applyShellSettings() {
   const settings = state.settings;
-  rootEl.dataset.position = settings.position || "top";
+  const pos = settings.position || "top";
+  rootEl.dataset.position = pos;
+  // Keep shadow host pinned to correct edge.
+  if (shadowHost) {
+    shadowHost.style.setProperty("top", pos === "top" ? "0" : "auto", "important");
+    shadowHost.style.setProperty("bottom", pos === "bottom" ? "0" : "auto", "important");
+  }
   const zoomFactor = Math.max(0.25, Number(state.zoomFactor || 1));
   const zoomInverse = 1 / zoomFactor;
 
@@ -405,15 +542,23 @@ function tabMatchesSearch(tab) {
 function render() {
   ensureUI();
   if (!state.settings || !state.settings.enabled || !shouldShowByMode()) {
-    rootEl.style.display = "none";
+    if (shadowHost) shadowHost.style.setProperty("display", "none", "important");
     clearPageOffset();
     return;
   }
-  rootEl.style.display = "block";
+  if (shadowHost) shadowHost.style.setProperty("display", "block", "important");
 
   applyShellSettings();
   hideContextMenu();
   clearDropMarkers();
+
+  // Invalidate tab element cache when settings that affect tab structure change.
+  const s = state.settings;
+  const settingsKey = `${s.tabMinWidth}|${s.tabMaxWidth}|${s.padding}|${s.iconSize}|${s.labelFontSize}|${s.pinnedIconOnly}|${s.showCloseButton}`;
+  if (settingsKey !== lastSettingsKey) {
+    tabElCache.clear();
+    lastSettingsKey = settingsKey;
+  }
 
   const groupsById = new Map((state.groups || []).map((g) => [g.id, g]));
   const sortedAllTabs = sortTabs(state.tabs || []);
@@ -650,6 +795,12 @@ function render() {
     rowsEl.appendChild(rowScroll);
   }
 
+  // Prune tab cache: remove entries for tabs no longer present.
+  const liveTabIds = new Set((state.tabs || []).map((t) => t.id));
+  for (const id of tabElCache.keys()) {
+    if (!liveTabIds.has(id)) tabElCache.delete(id);
+  }
+
   if (manuallyHidden) {
     rootEl.dataset.hidden = "true";
     clearPageOffset();
@@ -709,22 +860,84 @@ function computeRowLengths(totalTabs, rowCount, tabsPerRow) {
   return lengths;
 }
 
+const GROUP_COLORS = {
+  grey: "#9ea4a9",
+  blue: "#3c9cff",
+  red: "#d45050",
+  yellow: "#d4b04f",
+  green: "#4aaa62",
+  pink: "#d55aa2",
+  purple: "#8659d9",
+  cyan: "#3db3b3",
+  orange: "#d17f3f"
+};
+
 function groupColor(color) {
-  const colors = {
-    grey: "#9ea4a9",
-    blue: "#3c9cff",
-    red: "#d45050",
-    yellow: "#d4b04f",
-    green: "#4aaa62",
-    pink: "#d55aa2",
-    purple: "#8659d9",
-    cyan: "#3db3b3",
-    orange: "#d17f3f"
-  };
-  return colors[color] || colors.grey;
+  return GROUP_COLORS[color] || GROUP_COLORS.grey;
 }
 
 function renderTab(tab, rowIndex) {
+  const cached = tabElCache.get(tab.id);
+  if (cached) return updateCachedTab(cached, tab, rowIndex);
+  return createTab(tab, rowIndex);
+}
+
+function updateCachedTab(cached, tab, rowIndex) {
+  const { el, imgEl, labelEl, metaEl, closeBtnEl } = cached;
+  el.dataset.row = String(rowIndex);
+  el.classList.toggle("ctb-active", !!tab.active);
+  el.classList.toggle("ctb-focused", tab.id === focusedTabId);
+
+  const minW = Number(state.settings.tabMinWidth || 120);
+  const maxW = Number(state.settings.tabMaxWidth || 250);
+  const effectiveMinW = tab.pinned ? Math.max(56, minW) : Math.max(140, minW);
+  el.style.minWidth = `${effectiveMinW}px`;
+  el.style.maxWidth = `${Math.max(effectiveMinW, maxW)}px`;
+
+  // Update favicon only if the resolved src actually changed.
+  const iconFallback = chrome.runtime.getURL("assets/icons/icon16.png");
+  const safeFavIcon = isSafeFaviconSource(tab.favIconUrl) ? tab.favIconUrl : "";
+  const iconSize = Number(state.settings.iconSize || 24);
+  const desiredSrc = safeFavIcon || faviconURL(tab.url, Math.max(20, iconSize)) || iconFallback;
+  if (imgEl.getAttribute("data-src") !== desiredSrc) {
+    imgEl.src = desiredSrc;
+    imgEl.setAttribute("data-src", desiredSrc);
+  }
+
+  // Update label text.
+  const pinnedIconOnly = state.settings.pinnedIconOnly && tab.pinned;
+  if (labelEl) {
+    if (pinnedIconOnly) {
+      labelEl.style.display = "none";
+    } else {
+      labelEl.style.display = "";
+      const titleText = safeText(tab.title) || safeText(tab.url) || "Tab";
+      if (labelEl.textContent !== titleText) {
+        labelEl.textContent = titleText;
+        labelEl.title = `${titleText}\n${safeText(tab.url)}`;
+      }
+    }
+  }
+
+  // Update metadata.
+  if (metaEl) {
+    let metaText = "";
+    if (tab.muted) metaText = "\u{1F507}";
+    else if (tab.audible) metaText = "\u{1F50A}";
+    else if (tab.status === "loading") metaText = "\u2026";
+    metaEl.textContent = metaText;
+    metaEl.style.display = metaText && effectiveMinW >= 170 ? "" : "none";
+  }
+
+  // Update close button visibility.
+  if (closeBtnEl) {
+    closeBtnEl.style.display = state.settings.showCloseButton ? "" : "none";
+  }
+
+  return el;
+}
+
+function createTab(tab, rowIndex) {
   const tabEl = document.createElement("div");
   tabEl.className = "ctb-tab";
   tabEl.dataset.tabId = String(tab.id);
@@ -742,9 +955,9 @@ function renderTab(tab, rowIndex) {
   const iconSize = Number(state.settings.iconSize || 24);
   const labelSize = Number(state.settings.labelFontSize || 13);
 
-  const effectiveMinW = tab.pinned ? Math.max(56, minW) : Math.max(120, minW);
+  const effectiveMinW = tab.pinned ? Math.max(56, minW) : Math.max(140, minW);
   tabEl.style.minWidth = `${effectiveMinW}px`;
-  tabEl.style.maxWidth = `${Math.max(effectiveMinW + 20, maxW)}px`;
+  tabEl.style.maxWidth = `${Math.max(effectiveMinW, maxW)}px`;
   tabEl.style.padding = `${Math.max(2, pad)}px`;
   tabEl.style.fontSize = `${Math.max(10, labelSize)}px`;
 
@@ -755,43 +968,51 @@ function renderTab(tab, rowIndex) {
   icon.alt = "";
   const iconFallback = chrome.runtime.getURL("assets/icons/icon16.png");
   const safeFavIcon = isSafeFaviconSource(tab.favIconUrl) ? tab.favIconUrl : "";
-  icon.src = safeFavIcon || faviconURL(tab.url, Math.max(20, iconSize)) || iconFallback;
+  const desiredSrc = safeFavIcon || faviconURL(tab.url, Math.max(20, iconSize)) || iconFallback;
+  icon.src = desiredSrc;
+  icon.setAttribute("data-src", desiredSrc);
   icon.onerror = () => {
     if (icon.src !== iconFallback) {
       icon.src = iconFallback;
+      icon.setAttribute("data-src", iconFallback);
     }
   };
   tabEl.appendChild(icon);
 
+  let labelEl = null;
   const pinnedIconOnly = state.settings.pinnedIconOnly && tab.pinned;
-  if (!pinnedIconOnly) {
-    const label = document.createElement("span");
-    label.className = "ctb-tab-label";
-    const titleText = safeText(tab.title) || safeText(tab.url) || "Tab";
-    label.textContent = titleText;
-    label.title = `${titleText}\n${safeText(tab.url)}`;
-    tabEl.appendChild(label);
-  }
+  // Always create label element (hidden when pinned-icon-only) so cache can toggle it.
+  labelEl = document.createElement("span");
+  labelEl.className = "ctb-tab-label";
+  const titleText = safeText(tab.title) || safeText(tab.url) || "Tab";
+  labelEl.textContent = titleText;
+  labelEl.title = `${titleText}\n${safeText(tab.url)}`;
+  if (pinnedIconOnly) labelEl.style.display = "none";
+  tabEl.appendChild(labelEl);
 
-  const metadata = document.createElement("span");
-  metadata.className = "ctb-tab-metadata";
-  if (tab.muted) metadata.textContent = "🔇";
-  else if (tab.audible) metadata.textContent = "🔊";
-  else if (tab.status === "loading") metadata.textContent = "…";
-  if (metadata.textContent) tabEl.appendChild(metadata);
+  const metaEl = document.createElement("span");
+  metaEl.className = "ctb-tab-metadata";
+  let metaText = "";
+  if (tab.muted) metaText = "\u{1F507}";
+  else if (tab.audible) metaText = "\u{1F50A}";
+  else if (tab.status === "loading") metaText = "\u2026";
+  metaEl.textContent = metaText;
+  metaEl.style.display = metaText && effectiveMinW >= 170 ? "" : "none";
+  tabEl.appendChild(metaEl);
 
-  if (state.settings.showCloseButton) {
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "ctb-tab-close";
-    closeBtn.type = "button";
-    closeBtn.textContent = "×";
-    closeBtn.title = "Close tab";
-    closeBtn.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await sendMessage({ type: "CLOSE_TAB", tabId: tab.id });
-    });
-    tabEl.appendChild(closeBtn);
-  }
+  let closeBtnEl = null;
+  // Always create close button (hidden when disabled) so cache can toggle it.
+  closeBtnEl = document.createElement("button");
+  closeBtnEl.className = "ctb-tab-close";
+  closeBtnEl.type = "button";
+  closeBtnEl.textContent = "\u00d7";
+  closeBtnEl.title = "Close tab";
+  closeBtnEl.style.display = state.settings.showCloseButton ? "" : "none";
+  closeBtnEl.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await sendMessage({ type: "CLOSE_TAB", tabId: tab.id });
+  });
+  tabEl.appendChild(closeBtnEl);
 
   tabEl.addEventListener("click", async () => {
     focusedTabId = tab.id;
@@ -840,7 +1061,6 @@ function renderTab(tab, rowIndex) {
     }
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
     if (isCrossRow && centerIntent) {
-      // In cross-row drags, center hover means "move into row", not "insert before/after this tab".
       clearDropMarkers();
       return;
     }
@@ -867,7 +1087,6 @@ function renderTab(tab, rowIndex) {
     const middleEnd = rect.left + rect.width * 0.75;
     const centerIntent = event.clientX >= middleStart && event.clientX <= middleEnd;
     if (isCrossRow && centerIntent) {
-      // Let row-level drop handler process this as a row move.
       event.preventDefault();
       return;
     }
@@ -885,6 +1104,9 @@ function renderTab(tab, rowIndex) {
     clearDropMarkers();
     tabEl.classList.remove("ctb-dragging");
   });
+
+  // Store in cache for reuse on subsequent renders.
+  tabElCache.set(tab.id, { el: tabEl, imgEl: icon, labelEl, metaEl, closeBtnEl });
 
   return tabEl;
 }
@@ -1083,13 +1305,13 @@ function requestHideWithDelay() {
 }
 
 function onMouseMoveForAutohide(event) {
-  if (!state.settings?.autoHide || !rootEl || rootEl.style.display === "none") return;
+  if (!state.settings?.autoHide || !rootEl || (shadowHost && shadowHost.style.display === "none")) return;
   const edge = Number(state.settings.activationEdgePx || 5);
   const nearTop = event.clientY <= edge;
   const nearBottom = event.clientY >= window.innerHeight - edge;
   const targetNearEdge = state.settings.position === "bottom" ? nearBottom : nearTop;
 
-  if (targetNearEdge || rootEl.matches(":hover")) {
+  if (targetNearEdge || overlayHovered) {
     rootEl.dataset.hidden = "false";
     applyPageOffsetIfNeeded();
     requestHideWithDelay();
@@ -1138,7 +1360,7 @@ function clearPageOffset() {
 
 function handleGlobalKeydown(event) {
   if (!state.settings?.enabled) return;
-  if (!rootEl || rootEl.style.display === "none") return;
+  if (!rootEl || (shadowHost && shadowHost.style.display === "none")) return;
   if (event.altKey && event.shiftKey && event.key.toLowerCase() === "b") {
     manuallyHidden = !manuallyHidden;
     if (manuallyHidden) {
@@ -1159,7 +1381,6 @@ function handleGlobalKeydown(event) {
   if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
   // Keep tab navigation keys scoped to active overlay interaction.
   const insideOverlay = rootEl.contains(event.target);
-  const overlayHovered = rootEl.matches(":hover");
   if (!insideOverlay && !overlayHovered) return;
   if (!["ArrowLeft", "ArrowRight", "Enter", "Delete"].includes(event.key)) return;
   if (state.tabs.length === 0) return;

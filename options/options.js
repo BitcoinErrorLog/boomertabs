@@ -14,7 +14,6 @@ const DEFAULTS = {
   showNewTabButton: true,
   showSearchBar: true,
   showGroups: true,
-  collapseGroups: false,
   theme: "dark",
   backgroundColor: "#1e1e1e",
   textColor: "#e6e6e6",
@@ -45,7 +44,6 @@ const CHECKBOX_FIELDS = new Set([
   "showNewTabButton",
   "showSearchBar",
   "showGroups",
-  "collapseGroups",
   "autoHide",
   "pinnedIconOnly"
 ]);

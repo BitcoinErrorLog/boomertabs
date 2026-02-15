@@ -14,7 +14,6 @@ const DEFAULT_SETTINGS = {
   showNewTabButton: true,
   showSearchBar: true,
   showGroups: true,
-  collapseGroups: false,
   theme: "dark",
   backgroundColor: "#1e1e1e",
   textColor: "#e6e6e6",
@@ -42,11 +41,6 @@ function asBool(value, fallback) {
   return fallback;
 }
 
-function asString(value, fallback) {
-  if (typeof value === "string" && value.length > 0) return value;
-  return fallback;
-}
-
 function asColor(value, fallback) {
   if (typeof value === "string" && HEX_COLOR_RE.test(value.trim())) {
     return value.trim();
@@ -71,7 +65,6 @@ function normalizeSettings(stored) {
     showNewTabButton: asBool(stored.showNewTabButton, DEFAULT_SETTINGS.showNewTabButton),
     showSearchBar: asBool(stored.showSearchBar, DEFAULT_SETTINGS.showSearchBar),
     showGroups: asBool(stored.showGroups, DEFAULT_SETTINGS.showGroups),
-    collapseGroups: asBool(stored.collapseGroups, DEFAULT_SETTINGS.collapseGroups),
     theme: ["dark", "light", "custom"].includes(stored.theme) ? stored.theme : DEFAULT_SETTINGS.theme,
     backgroundColor: asColor(stored.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
     textColor: asColor(stored.textColor, DEFAULT_SETTINGS.textColor),
@@ -143,6 +136,16 @@ async function pruneWindowCollapsedMap(windowId, validGroupIds) {
   await chrome.storage.local.set({ [COLLAPSED_GROUPS_KEY]: state });
 }
 
+async function pruneCollapsedMapForWindow(windowId) {
+  if (!windowId || windowId < 0) return;
+  try {
+    const groups = await chrome.tabGroups.query({ windowId });
+    await pruneWindowCollapsedMap(windowId, groups.map((g) => g.id));
+  } catch (_error) {
+    // Window may have closed.
+  }
+}
+
 function safeTitle(tab) {
   if (tab.title && tab.title.trim().length > 0) return tab.title;
   if (tab.pendingUrl) return tab.pendingUrl;
@@ -199,11 +202,6 @@ async function buildWindowState(windowId) {
     groupId: typeof tab.groupId === "number" ? tab.groupId : chrome.tabGroups.TAB_GROUP_ID_NONE
   }));
 
-  await pruneWindowCollapsedMap(
-    windowId,
-    groups.map((group) => group.id)
-  );
-
   const payloadGroups = groups.map((group) => ({
     id: group.id,
     title: group.title || "",
@@ -216,7 +214,8 @@ async function buildWindowState(windowId) {
     windowState,
     tabs: payloadTabs,
     groups: payloadGroups,
-    hasGroups: groupById.size > 0
+    hasGroups: groupById.size > 0,
+    _rawTabs: tabs
   };
 }
 
@@ -224,7 +223,8 @@ async function broadcastWindowState(windowId) {
   if (!windowId || windowId < 0) return;
   try {
     const state = await buildWindowState(windowId);
-    const windowTabs = await chrome.tabs.query({ windowId });
+    const windowTabs = state._rawTabs;
+    delete state._rawTabs;
 
     await Promise.all(
       windowTabs.map(async (tab) => {
@@ -297,6 +297,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const payload = await buildWindowState(windowId);
+      delete payload._rawTabs;
       payload.zoomFactor = await getTabZoom(senderTab?.id);
       sendResponse({ ok: true, payload });
       return;
@@ -411,9 +412,15 @@ chrome.tabs.onZoomChange.addListener((zoomChangeInfo) => {
     .catch(() => {});
 });
 
-chrome.tabGroups.onCreated.addListener((group) => scheduleBroadcast(group.windowId));
+chrome.tabGroups.onCreated.addListener((group) => {
+  pruneCollapsedMapForWindow(group.windowId);
+  scheduleBroadcast(group.windowId);
+});
 chrome.tabGroups.onUpdated.addListener((group) => scheduleBroadcast(group.windowId));
-chrome.tabGroups.onRemoved.addListener((group) => scheduleBroadcast(group.windowId));
+chrome.tabGroups.onRemoved.addListener((group) => {
+  pruneCollapsedMapForWindow(group.windowId);
+  scheduleBroadcast(group.windowId);
+});
 
 async function broadcastAllWindows() {
   try {
