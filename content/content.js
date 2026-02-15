@@ -742,8 +742,9 @@ function renderTab(tab, rowIndex) {
   const iconSize = Number(state.settings.iconSize || 24);
   const labelSize = Number(state.settings.labelFontSize || 13);
 
-  tabEl.style.minWidth = `${Math.max(56, minW)}px`;
-  tabEl.style.maxWidth = `${Math.max(minW, maxW)}px`;
+  const effectiveMinW = tab.pinned ? Math.max(56, minW) : Math.max(120, minW);
+  tabEl.style.minWidth = `${effectiveMinW}px`;
+  tabEl.style.maxWidth = `${Math.max(effectiveMinW + 20, maxW)}px`;
   tabEl.style.padding = `${Math.max(2, pad)}px`;
   tabEl.style.fontSize = `${Math.max(10, labelSize)}px`;
 
@@ -774,9 +775,9 @@ function renderTab(tab, rowIndex) {
 
   const metadata = document.createElement("span");
   metadata.className = "ctb-tab-metadata";
-  if (tab.muted) metadata.textContent = "Muted";
-  else if (tab.audible) metadata.textContent = "Audio";
-  else if (tab.status === "loading") metadata.textContent = "Loading";
+  if (tab.muted) metadata.textContent = "🔇";
+  else if (tab.audible) metadata.textContent = "🔊";
+  else if (tab.status === "loading") metadata.textContent = "…";
   if (metadata.textContent) tabEl.appendChild(metadata);
 
   if (state.settings.showCloseButton) {
