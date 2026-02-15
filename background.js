@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS = {
 const REFRESH_DEBOUNCE_MS = 120;
 const refreshTimers = new Map();
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
+const COLLAPSED_GROUPS_KEY = "ctbCollapsedGroupsByWindow";
 
 function clampNumber(value, min, max, fallback) {
   const n = Number(value);
@@ -90,6 +91,58 @@ async function getSettings() {
   return normalizeSettings(stored);
 }
 
+async function getCollapsedGroupsState() {
+  const stored = await chrome.storage.local.get(COLLAPSED_GROUPS_KEY);
+  const value = stored?.[COLLAPSED_GROUPS_KEY];
+  if (!value || typeof value !== "object") return {};
+  return value;
+}
+
+function normalizeCollapsedMap(map) {
+  if (!map || typeof map !== "object") return {};
+  const out = {};
+  for (const [groupId, collapsed] of Object.entries(map)) {
+    if (!Number.isInteger(Number(groupId))) continue;
+    out[groupId] = Boolean(collapsed);
+  }
+  return out;
+}
+
+async function getWindowCollapsedMap(windowId) {
+  const state = await getCollapsedGroupsState();
+  return normalizeCollapsedMap(state[String(windowId)]);
+}
+
+async function setWindowGroupCollapsed(windowId, groupId, collapsed) {
+  const state = await getCollapsedGroupsState();
+  const windowKey = String(windowId);
+  const map = normalizeCollapsedMap(state[windowKey]);
+  map[String(groupId)] = Boolean(collapsed);
+  state[windowKey] = map;
+  await chrome.storage.local.set({ [COLLAPSED_GROUPS_KEY]: state });
+}
+
+async function pruneWindowCollapsedMap(windowId, validGroupIds) {
+  const state = await getCollapsedGroupsState();
+  const windowKey = String(windowId);
+  const map = normalizeCollapsedMap(state[windowKey]);
+  const valid = new Set(validGroupIds.map((id) => String(id)));
+  let changed = false;
+  for (const key of Object.keys(map)) {
+    if (!valid.has(key)) {
+      delete map[key];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  if (Object.keys(map).length === 0) {
+    delete state[windowKey];
+  } else {
+    state[windowKey] = map;
+  }
+  await chrome.storage.local.set({ [COLLAPSED_GROUPS_KEY]: state });
+}
+
 function safeTitle(tab) {
   if (tab.title && tab.title.trim().length > 0) return tab.title;
   if (tab.pendingUrl) return tab.pendingUrl;
@@ -120,11 +173,12 @@ async function getTabZoom(tabId) {
 }
 
 async function buildWindowState(windowId) {
-  const [tabs, groups, settings, windowState] = await Promise.all([
+  const [tabs, groups, settings, windowState, collapsedMap] = await Promise.all([
     chrome.tabs.query({ windowId }),
     chrome.tabGroups.query({ windowId }),
     getSettings(),
-    getWindowState(windowId)
+    getWindowState(windowId),
+    getWindowCollapsedMap(windowId)
   ]);
 
   const groupById = new Map(groups.map((g) => [g.id, g]));
@@ -145,11 +199,16 @@ async function buildWindowState(windowId) {
     groupId: typeof tab.groupId === "number" ? tab.groupId : chrome.tabGroups.TAB_GROUP_ID_NONE
   }));
 
+  await pruneWindowCollapsedMap(
+    windowId,
+    groups.map((group) => group.id)
+  );
+
   const payloadGroups = groups.map((group) => ({
     id: group.id,
     title: group.title || "",
     color: group.color || "grey",
-    collapsed: Boolean(group.collapsed)
+    collapsed: Boolean(collapsedMap[String(group.id)])
   }));
 
   return {
@@ -287,6 +346,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "MOVE_TABS_BLOCK") {
+      if (!Array.isArray(message.tabIds) || message.tabIds.length === 0) {
+        throw new Error("Invalid tab ids.");
+      }
+      const tabIds = message.tabIds.filter((id) => assertTabId(id));
+      if (tabIds.length === 0) throw new Error("Invalid tab ids.");
+      if (!Number.isInteger(message.index) || message.index < -1) throw new Error("Invalid target index.");
+      await chrome.tabs.move(tabIds, { index: message.index });
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (message?.type === "GROUP_TAB") {
       if (!assertTabId(message.tabId)) throw new Error("Invalid tab id.");
       const options = { tabIds: [message.tabId] };
@@ -307,7 +378,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === "SET_GROUP_COLLAPSED") {
       if (!Number.isInteger(message.groupId)) throw new Error("Invalid group id.");
-      await chrome.tabGroups.update(message.groupId, { collapsed: Boolean(message.collapsed) });
+      if (!senderWindowId) throw new Error("Could not determine sender window.");
+      await setWindowGroupCollapsed(senderWindowId, message.groupId, Boolean(message.collapsed));
+      scheduleBroadcast(senderWindowId);
       sendResponse({ ok: true });
       return;
     }
