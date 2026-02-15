@@ -30,7 +30,33 @@ let originalHtmlPaddingTop = "";
 let originalHtmlPaddingBottom = "";
 let draggingTabId = null;
 let draggingFromRow = null;
+let draggingGroupTabIds = null;
 let searchExpanded = false;
+
+function setLocalGroupCollapsed(groupId, collapsed) {
+  const nextGroups = (state.groups || []).map((group) =>
+    group.id === groupId ? { ...group, collapsed: Boolean(collapsed) } : group
+  );
+  state = {
+    ...state,
+    groups: nextGroups
+  };
+  scheduleRender();
+}
+
+async function toggleGroupCollapsed(groupId, currentCollapsed) {
+  const nextCollapsed = !Boolean(currentCollapsed);
+  setLocalGroupCollapsed(groupId, nextCollapsed);
+  const response = await sendMessage({
+    type: "SET_GROUP_COLLAPSED",
+    groupId,
+    collapsed: nextCollapsed
+  });
+  if (!response?.ok) {
+    // Revert optimistic local update if background write fails.
+    setLocalGroupCollapsed(groupId, currentCollapsed);
+  }
+}
 
 function debounce(fn, wait) {
   let t = null;
@@ -45,8 +71,49 @@ function safeText(input) {
   return String(input);
 }
 
+function isPrivateIpv4(hostname) {
+  const parts = hostname.split(".").map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+}
+
+function isSafeFaviconSource(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" ||
+      parsed.protocol === "chrome-extension:" ||
+      parsed.protocol === "data:" ||
+      parsed.protocol === "chrome:"
+    );
+  } catch (_error) {
+    return false;
+  }
+}
+
+function canUsePageUrlForFavicon(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".local")) return false;
+    if (isPrivateIpv4(host)) return false;
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function faviconURL(url, size) {
-  if (!url) return "";
+  if (!canUsePageUrlForFavicon(url)) return "";
   try {
     const u = new URL(chrome.runtime.getURL("/_favicon/"));
     u.searchParams.set("pageUrl", url);
@@ -365,6 +432,7 @@ function render() {
     return;
   }
 
+  const canDragGroups = !searchValue;
   for (let i = 0; i < rowCount; i += 1) {
     const rowScroll = document.createElement("div");
     rowScroll.className = "ctb-row-scroll";
@@ -382,7 +450,7 @@ function render() {
 
     const rowTabs = rowPlan.rows[i] || [];
     rowScroll.addEventListener("dragover", (event) => {
-      if (draggingTabId == null) return;
+      if (draggingTabId == null && draggingGroupTabIds == null) return;
       event.preventDefault();
       event.stopPropagation();
       rowScroll.classList.add("ctb-row-drop-target");
@@ -395,14 +463,23 @@ function render() {
       event.preventDefault();
       event.stopPropagation();
       rowScroll.classList.remove("ctb-row-drop-target");
-      if (draggingTabId == null) return;
-      await moveDraggedTabToRow(
-        draggingTabId,
-        i,
-        rowPlanAll.rowStarts,
-        rowPlanAll.rowLengths,
-        sortedAllTabs
-      );
+      if (draggingTabId != null) {
+        await moveDraggedTabToRow(
+          draggingTabId,
+          i,
+          rowPlanAll.rowStarts,
+          rowPlanAll.rowLengths,
+          sortedAllTabs
+        );
+      } else if (draggingGroupTabIds && draggingGroupTabIds.length > 0) {
+        await moveDraggedGroupToRow(
+          draggingGroupTabIds,
+          i,
+          rowPlanAll.rowStarts,
+          rowPlanAll.rowLengths,
+          sortedAllTabs
+        );
+      }
       clearDropMarkers();
     });
     if (rowTabs.length === 0) {
@@ -421,6 +498,9 @@ function render() {
     for (const group of rowGroups) {
       const groupEl = document.createElement("div");
       groupEl.className = "ctb-group";
+      if (group.groupId !== GROUP_NONE && canDragGroups) {
+        groupEl.dataset.groupId = String(group.groupId);
+      }
       const useFullGroupHeader = state.settings.showGroups && rowCount === 1;
 
       if (useFullGroupHeader) {
@@ -442,13 +522,26 @@ function render() {
           toggle.className = "ctb-group-toggle";
           toggle.textContent = group.collapsed ? "Expand" : "Collapse";
           toggle.addEventListener("click", async () => {
-            await sendMessage({
-              type: "SET_GROUP_COLLAPSED",
-              groupId: group.groupId,
-              collapsed: !group.collapsed
-            });
+            await toggleGroupCollapsed(group.groupId, group.collapsed);
           });
           header.appendChild(toggle);
+          if (canDragGroups) {
+            header.setAttribute("draggable", "true");
+            header.title = `${header.title ? `${header.title} ` : ""}Drag to move group`;
+            header.addEventListener("dragstart", (event) => {
+              draggingGroupTabIds = group.tabs.map((tab) => tab.id);
+              groupEl.classList.add("ctb-group-dragging");
+              if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", `group:${group.groupId}`);
+              }
+            });
+            header.addEventListener("dragend", () => {
+              draggingGroupTabIds = null;
+              clearDropMarkers();
+              groupEl.classList.remove("ctb-group-dragging");
+            });
+          }
         }
         groupEl.appendChild(header);
       }
@@ -458,28 +551,49 @@ function render() {
       groupTabsEl.style.borderLeft = state.settings.showGroups ? `3px solid ${groupColor(group.color)}` : "none";
       groupTabsEl.style.paddingLeft = state.settings.showGroups ? "6px" : "0";
 
-      const collapseBySetting = state.settings.collapseGroups && group.groupId !== GROUP_NONE;
-      const isCollapsed = collapseBySetting ? group.collapsed : false;
+      const isCollapsed = group.groupId !== GROUP_NONE ? group.collapsed : false;
       const visibleTabs = isCollapsed ? group.tabs.filter((tab) => tab.active).slice(0, 1) : group.tabs;
 
-      // Compact group UX for multi-row mode: a light chip instead of repeated full headers.
+      // Compact group UX for multi-row mode: single colored button with chevron affordance.
       if (state.settings.showGroups && !useFullGroupHeader) {
         if (group.groupId !== GROUP_NONE) {
-          const chip = document.createElement("span");
+          const chip = document.createElement("button");
           chip.className = "ctb-group-chip";
-          const label = group.title || "Group";
-          chip.textContent = `${label} (${group.tabs.length})`;
-          const toggle = document.createElement("button");
-          toggle.className = "ctb-group-toggle";
-          toggle.textContent = group.collapsed ? "Expand" : "Collapse";
-          toggle.addEventListener("click", async () => {
-            await sendMessage({
-              type: "SET_GROUP_COLLAPSED",
-              groupId: group.groupId,
-              collapsed: !group.collapsed
-            });
+          chip.type = "button";
+          chip.style.setProperty("--ctb-group-color", groupColor(group.color));
+          chip.title = group.collapsed ? "Expand group" : "Collapse group";
+          chip.setAttribute("aria-label", chip.title);
+          chip.addEventListener("click", async () => {
+            await toggleGroupCollapsed(group.groupId, group.collapsed);
           });
-          chip.appendChild(toggle);
+          if (canDragGroups) {
+            chip.setAttribute("draggable", "true");
+            chip.title = `${chip.title} - drag to move group`;
+            chip.addEventListener("dragstart", (event) => {
+              draggingGroupTabIds = group.tabs.map((tab) => tab.id);
+              groupEl.classList.add("ctb-group-dragging");
+              if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", `group:${group.groupId}`);
+              }
+            });
+            chip.addEventListener("dragend", () => {
+              draggingGroupTabIds = null;
+              clearDropMarkers();
+              groupEl.classList.remove("ctb-group-dragging");
+            });
+          }
+
+          const label = document.createElement("span");
+          label.className = "ctb-group-chip-label";
+          label.textContent = `${group.title || "Group"} (${group.tabs.length})`;
+          chip.appendChild(label);
+
+          const chevron = document.createElement("span");
+          chevron.className = "ctb-group-chip-chevron";
+          chevron.textContent = ">";
+          chip.appendChild(chevron);
+
           groupTabsEl.appendChild(chip);
         }
       }
@@ -487,6 +601,46 @@ function render() {
       for (const tab of visibleTabs) {
         groupTabsEl.appendChild(renderTab(tab, i));
       }
+
+      groupEl.addEventListener("dragover", (event) => {
+        if (!draggingGroupTabIds || draggingGroupTabIds.length === 0) return;
+        if (group.groupId === GROUP_NONE) return;
+        const thisGroupTabIds = new Set(group.tabs.map((tab) => tab.id));
+        const sameGroup = draggingGroupTabIds.every((id) => thisGroupTabIds.has(id));
+        if (sameGroup) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = groupEl.getBoundingClientRect();
+        const placeAfter = event.clientX > rect.left + rect.width / 2;
+        groupEl.classList.remove("ctb-group-drop-before", "ctb-group-drop-after");
+        groupEl.classList.add(placeAfter ? "ctb-group-drop-after" : "ctb-group-drop-before");
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      });
+      groupEl.addEventListener("dragleave", () => {
+        groupEl.classList.remove("ctb-group-drop-before", "ctb-group-drop-after");
+      });
+      groupEl.addEventListener("drop", async (event) => {
+        if (!draggingGroupTabIds || draggingGroupTabIds.length === 0) return;
+        if (group.groupId === GROUP_NONE) return;
+        const thisGroupTabIds = new Set(group.tabs.map((tab) => tab.id));
+        const sameGroup = draggingGroupTabIds.every((id) => thisGroupTabIds.has(id));
+        if (sameGroup) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const ordered = sortTabs(state.tabs || []);
+        const targetPositions = ordered
+          .map((tab, index) => ({ tab, index }))
+          .filter(({ tab }) => thisGroupTabIds.has(tab.id))
+          .map(({ index }) => index);
+        if (targetPositions.length === 0) return;
+        const rect = groupEl.getBoundingClientRect();
+        const placeAfter = event.clientX > rect.left + rect.width / 2;
+        const targetPos = placeAfter
+          ? Math.max(...targetPositions) + 1
+          : Math.min(...targetPositions);
+        await moveGroupToOrderedPosition(draggingGroupTabIds, targetPos, ordered);
+        clearDropMarkers();
+      });
       groupEl.appendChild(groupTabsEl);
       rowScroll.appendChild(groupEl);
     }
@@ -598,9 +752,13 @@ function renderTab(tab, rowIndex) {
   icon.style.width = `${Math.max(16, iconSize)}px`;
   icon.style.height = `${Math.max(16, iconSize)}px`;
   icon.alt = "";
-  icon.src = tab.favIconUrl || faviconURL(tab.url, Math.max(20, iconSize));
+  const iconFallback = chrome.runtime.getURL("assets/icons/icon16.png");
+  const safeFavIcon = isSafeFaviconSource(tab.favIconUrl) ? tab.favIconUrl : "";
+  icon.src = safeFavIcon || faviconURL(tab.url, Math.max(20, iconSize)) || iconFallback;
   icon.onerror = () => {
-    icon.src = faviconURL(tab.url, Math.max(20, iconSize));
+    if (icon.src !== iconFallback) {
+      icon.src = iconFallback;
+    }
   };
   tabEl.appendChild(icon);
 
@@ -608,8 +766,9 @@ function renderTab(tab, rowIndex) {
   if (!pinnedIconOnly) {
     const label = document.createElement("span");
     label.className = "ctb-tab-label";
-    label.textContent = safeText(tab.title);
-    label.title = `${safeText(tab.title)}\n${safeText(tab.url)}`;
+    const titleText = safeText(tab.title) || safeText(tab.url) || "Tab";
+    label.textContent = titleText;
+    label.title = `${titleText}\n${safeText(tab.url)}`;
     tabEl.appendChild(label);
   }
 
@@ -656,6 +815,7 @@ function renderTab(tab, rowIndex) {
   });
 
   tabEl.addEventListener("dragstart", (event) => {
+    draggingGroupTabIds = null;
     draggingTabId = tab.id;
     draggingFromRow = Number(tabEl.dataset.row);
     tabEl.classList.add("ctb-dragging");
@@ -720,6 +880,7 @@ function renderTab(tab, rowIndex) {
   tabEl.addEventListener("dragend", () => {
     draggingTabId = null;
     draggingFromRow = null;
+    draggingGroupTabIds = null;
     clearDropMarkers();
     tabEl.classList.remove("ctb-dragging");
   });
@@ -728,10 +889,19 @@ function renderTab(tab, rowIndex) {
 }
 
 function clearDropMarkers() {
-  const marked = rootEl?.querySelectorAll(".ctb-drop-before, .ctb-drop-after, .ctb-dragging");
+  const marked = rootEl?.querySelectorAll(
+    ".ctb-drop-before, .ctb-drop-after, .ctb-dragging, .ctb-group-drop-before, .ctb-group-drop-after, .ctb-group-dragging"
+  );
   if (!marked) return;
   for (const el of marked) {
-    el.classList.remove("ctb-drop-before", "ctb-drop-after", "ctb-dragging");
+    el.classList.remove(
+      "ctb-drop-before",
+      "ctb-drop-after",
+      "ctb-dragging",
+      "ctb-group-drop-before",
+      "ctb-group-drop-after",
+      "ctb-group-dragging"
+    );
   }
   const rowMarked = rootEl?.querySelectorAll(".ctb-row-drop-target");
   if (rowMarked) {
@@ -754,6 +924,14 @@ async function moveDraggedTabToRow(sourceTabId, rowIndex, rowStarts, rowLengths,
   if (rowIndex < 0 || rowIndex >= rowStarts.length) return;
   const desiredPos = Number(rowStarts[rowIndex] || 0) + Number(rowLengths[rowIndex] || 0);
   await moveTabToOrderedPosition(sourceTabId, desiredPos, sortedTabs);
+}
+
+async function moveDraggedGroupToRow(sourceTabIds, rowIndex, rowStarts, rowLengths, sortedTabs) {
+  if (!Array.isArray(sortedTabs) || sortedTabs.length === 0) return;
+  if (!Array.isArray(sourceTabIds) || sourceTabIds.length === 0) return;
+  if (rowIndex < 0 || rowIndex >= rowStarts.length) return;
+  const desiredPos = Number(rowStarts[rowIndex] || 0) + Number(rowLengths[rowIndex] || 0);
+  await moveGroupToOrderedPosition(sourceTabIds, desiredPos, sortedTabs);
 }
 
 async function moveTabToOrderedPosition(sourceTabId, desiredPosInFullOrder, orderedTabs) {
@@ -786,6 +964,43 @@ async function moveTabToOrderedPosition(sourceTabId, desiredPosInFullOrder, orde
   if (targetIndex === source.index) return;
   await sendMessage({ type: "MOVE_TAB", tabId: source.id, index: targetIndex });
   focusedTabId = source.id;
+}
+
+async function moveGroupToOrderedPosition(sourceTabIds, desiredPosInFullOrder, orderedTabs) {
+  const sourceIdSet = new Set(sourceTabIds);
+  const sourceTabs = orderedTabs.filter((tab) => sourceIdSet.has(tab.id));
+  if (sourceTabs.length === 0) return;
+
+  const sourcePinned = Boolean(sourceTabs[0].pinned);
+  const orderedSourceTabs = sourceTabs.filter((tab) => tab.pinned === sourcePinned);
+  if (orderedSourceTabs.length === 0) return;
+  const orderedSourceIds = orderedSourceTabs.map((tab) => tab.id);
+  const effectiveSourceSet = new Set(orderedSourceIds);
+  const withoutSource = orderedTabs.filter((tab) => !effectiveSourceSet.has(tab.id));
+
+  const fullMax = orderedTabs.length;
+  const boundedFullPos = Math.max(0, Math.min(fullMax, Number(desiredPosInFullOrder)));
+  const sourceBeforeTarget = orderedTabs.reduce(
+    (count, tab, index) => count + (index < boundedFullPos && effectiveSourceSet.has(tab.id) ? 1 : 0),
+    0
+  );
+  let desiredPosWithoutSource = boundedFullPos - sourceBeforeTarget;
+
+  const pinnedCount = withoutSource.reduce((acc, tab) => acc + (tab.pinned ? 1 : 0), 0);
+  if (sourcePinned) {
+    desiredPosWithoutSource = Math.min(desiredPosWithoutSource, pinnedCount);
+  } else {
+    desiredPosWithoutSource = Math.max(desiredPosWithoutSource, pinnedCount);
+  }
+  desiredPosWithoutSource = Math.max(0, Math.min(withoutSource.length, desiredPosWithoutSource));
+
+  let targetIndex = -1;
+  if (desiredPosWithoutSource < withoutSource.length) {
+    targetIndex = withoutSource[desiredPosWithoutSource].index;
+  }
+
+  await sendMessage({ type: "MOVE_TABS_BLOCK", tabIds: orderedSourceIds, index: targetIndex });
+  focusedTabId = orderedSourceIds[0];
 }
 
 function showContextMenu(x, y, tabId) {

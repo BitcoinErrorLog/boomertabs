@@ -181,6 +181,16 @@
   white-space: nowrap;
 }
 
+#ctb-root .ctb-group-header[draggable="true"],
+#ctb-root .ctb-group-chip[draggable="true"] {
+  cursor: grab;
+}
+
+#ctb-root .ctb-group-header[draggable="true"]:active,
+#ctb-root .ctb-group-chip[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 #ctb-root .ctb-group-toggle {
   border: 1px solid var(--ctb-border);
   background: rgba(255, 255, 255, 0.08);
@@ -201,19 +211,65 @@
 #ctb-root .ctb-group-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  min-height: 32px;
   border: 1px solid var(--ctb-border);
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 10px;
-  color: var(--ctb-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid color-mix(in srgb, var(--ctb-group-color, #666) 72%, #000 28%);
+  border-radius: 10px;
+  padding: 6px 10px 6px 12px;
+  font-size: 12px;
+  color: #ffffff;
+  background: color-mix(in srgb, var(--ctb-group-color, #666) 58%, #111 42%);
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 260px;
+  text-align: left;
+}
+
+#ctb-root .ctb-group-chip:hover {
+  filter: brightness(1.08);
+}
+
+#ctb-root .ctb-group-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#ctb-root .ctb-group-chip .ctb-group-toggle {
-  font-size: 10px;
-  padding: 0 4px;
+#ctb-root .ctb-group-chip-chevron {
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+#ctb-root .ctb-group.ctb-group-dragging {
+  opacity: 0.55;
+}
+
+#ctb-root .ctb-group.ctb-group-drop-before,
+#ctb-root .ctb-group.ctb-group-drop-after {
+  position: relative;
+}
+
+#ctb-root .ctb-group.ctb-group-drop-before::before,
+#ctb-root .ctb-group.ctb-group-drop-after::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  background: #7ab7ff;
+  border-radius: 2px;
+}
+
+#ctb-root .ctb-group.ctb-group-drop-before::before {
+  left: -3px;
+}
+
+#ctb-root .ctb-group.ctb-group-drop-after::after {
+  right: -3px;
 }
 
 #ctb-root .ctb-tab {
@@ -287,6 +343,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1 1 auto;
+  min-width: 42px;
+  color: var(--ctb-text);
 }
 
 #ctb-root .ctb-tab-metadata {
